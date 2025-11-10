@@ -1,4 +1,3 @@
-# file: light_reflection_blackhole_reflect_fix.py
 import pygame
 import math
 import random
@@ -6,7 +5,7 @@ import random
 pygame.init()
 WIDTH, HEIGHT = 900, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Curved Light Reflection + Black Hole")
+pygame.display.set_caption("Curved Light Reflection + Black Hole (with Mirror Normal)")
 
 clock = pygame.time.Clock()
 font = pygame.font.SysFont(None, 28)
@@ -49,11 +48,25 @@ while running:
     pygame.draw.circle(screen, (255, 80, 80), TARGET, 8)
     pygame.draw.circle(screen, (80, 200, 255), SOURCE, 6)
 
-    # 绘制镜子
+    # 绘制镜子 + 正反可视化
     for x, y, a in mirrors:
-        p1 = pygame.Vector2(x - 40 * math.cos(a), y - 40 * math.sin(a))
-        p2 = pygame.Vector2(x + 40 * math.cos(a), y + 40 * math.sin(a))
+        center = pygame.Vector2(x, y)
+        dir_vec = pygame.Vector2(math.cos(a), math.sin(a))
+        normal = pygame.Vector2(math.sin(a), -math.cos(a))
+
+        # 镜子主体
+        p1 = center - dir_vec * 40
+        p2 = center + dir_vec * 40
         pygame.draw.line(screen, (240, 240, 240), p1, p2, 3)
+
+        # 正面方向（红线）
+        front_end = center + normal * 20
+        pygame.draw.line(screen, (255, 100, 100), center, front_end, 2)
+        pygame.draw.circle(screen, (255, 100, 100), front_end, 3)
+
+        # 背面方向（蓝线）
+        back_end = center - normal * 20
+        pygame.draw.line(screen, (100, 100, 255), center, back_end, 1)
 
     # ---- 光线模拟 ----
     ray_pos = pygame.Vector2(SOURCE)
@@ -62,7 +75,7 @@ while running:
     success = False
     absorbed = False
 
-    for bounce in range(5):  # 最多反射 5 次
+    for bounce in range(5):
         step_size = 5
         for _ in range(2000 // step_size):
             next_pos = ray_pos + ray_dir * step_size
@@ -92,7 +105,7 @@ while running:
 
                 if dist < 3 and facing:
                     ray_dir = reflect_ray(ray_dir, normal)
-                    ray_pos = nearest + ray_dir * 3  # 防止卡镜子
+                    ray_pos = nearest + ray_dir * 3
                     reflected = True
                     break
 
