@@ -21,7 +21,7 @@ ray_dir_norm = ray_dir.normalize()
 
 # 计算偏移方向（沿入射光方向旋转45°的垂线方向）
 offset_dir = ray_dir_norm.rotate(45)
-mirror_center = pygame.Vector2(TARGET) + offset_dir * 10
+mirror_center = pygame.Vector2(TARGET) + offset_dir * 50
 
 # 镜子角度，使背面朝向接收点
 to_target = (pygame.Vector2(TARGET) - mirror_center).normalize()
@@ -134,7 +134,7 @@ while running:
             ray_pos = next_pos
 
             # 命中目标
-            if ray_pos.distance_to(TARGET) < 10:
+            if ray_pos.distance_to(TARGET) < 5:
                 success = True
                 break
 
@@ -159,13 +159,21 @@ while running:
             if event.button == 3:
                 mx, my = event.pos
                 mirrors.append([mx, my, 0, False])  # False 表示可旋转
-            # 滚轮控制角度（只旋转非固定镜子）
+                # 如果是第二块镜子，记录它用于同步
+                if len(mirrors) == 3:
+                    print("第二块镜子创建，固定镜子将与其同步旋转。")
+
+            # 滚轮控制角度
             if event.button in (4, 5) and mirrors:
+                delta = math.radians(5 if event.button == 4 else -5)
                 last = mirrors[-1]
-                # 若镜子标记为“可旋转”则允许调整角度
+                # 若最后一块镜子是可旋转的
                 if len(last) < 4 or not last[3]:
-                    delta = math.radians(5 if event.button == 4 else -5)
                     last[2] += delta
+
+                    # 仅当第二块镜子存在且为最后一块时才同步固定镜
+                    if len(mirrors) >= 3 and last is mirrors[2]:
+                        mirrors[0][2] += delta
 
     pygame.display.flip()
     clock.tick(60)
