@@ -30,6 +30,7 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+        frame = cv2.flip(frame, 1)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         found, corners = cv2.findChessboardCorners(gray, CHESSBOARD, None)

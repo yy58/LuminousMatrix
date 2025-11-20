@@ -26,16 +26,15 @@ def main():
     cap = cv2.VideoCapture(0)
 
     # --- camera calibration result here ----
-    camera_matrix = np.array([[950, 0, 640],
-                              [0, 950, 360],
-                              [0, 0, 1]], dtype=float)
-    dist_coeffs = np.zeros((5, 1))
+    params = np.load("camera_params.npz")
+    camera_matrix = params["camera_matrix"]
+    dist_coeffs = params["dist_coeffs"]
 
     # ArUco dict (change if needed)
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
 
-    marker_length = 0.03  # 3 cm marker side length
+    marker_length = 0.02  # 2 cm marker side length
 
     while True:
         ret, frame = cap.read()
