@@ -2,76 +2,112 @@ import cv2
 import numpy as np
 import math
 
+MARKER_LENGTH = 0.02
+DETECT_INTERVAL = 60
 
-def rvec_to_euler(rvec):
-    """Convert rotation vector → Euler angles (yaw, pitch, roll)."""
+def get_yaw_from_rvec(rvec):
     R, _ = cv2.Rodrigues(rvec)
-
-    sy = math.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
-    singular = sy < 1e-6
-
-    if not singular:
-        x = math.atan2(R[2, 1], R[2, 2])
-        y = math.atan2(-R[2, 0], sy)
-        z = math.atan2(R[1, 0], R[0, 0])
-    else:
-        x = math.atan2(-R[1, 2], R[1, 1])
-        y = math.atan2(-R[2, 0], sy)
-        z = 0
-
-    return np.degrees([x, y, z])  # roll, pitch, yaw
+    yaw = math.atan2(R[1, 0], R[0, 0])
+    return np.degrees(yaw)
 
 
 def main():
     cap = cv2.VideoCapture(0)
 
-    # --- camera calibration result here ----
     params = np.load("camera_params.npz")
     camera_matrix = params["camera_matrix"]
     dist_coeffs = params["dist_coeffs"]
 
-    # ArUco dict (change if needed)
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    dict_aruco = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(dict_aruco, parameters)
 
-    marker_length = 0.02  # 2 cm marker side length
+    last_ids = None
+    last_corners = None
+    last_rvecs = None
+    last_tvecs = None
+
+    frame_id = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_id += 1
+        need_detect = False
 
-        detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-        corners, ids, rejected = detector.detectMarkers(gray)
+        # 每 N 帧检测一次
+        if frame_id % DETECT_INTERVAL == 0:
+            need_detect = True
 
-        if ids is not None:
-            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+        # 没有历史数据必须检测
+        if last_ids is None:
+            need_detect = True
 
-            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                corners,
-                marker_length,
-                camera_matrix,
-                dist_coeffs,
-            )
+        # ----------------------
+        #     检 测 逻 辑
+        # ----------------------
+        if need_detect:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            corners, ids, _ = detector.detectMarkers(gray)
 
-            for i, marker_id in enumerate(ids.flatten()):
-                rvec = rvecs[i]
-                tvec = tvecs[i]
-
-                cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec, tvec, 0.05)
-
-                roll, pitch, yaw = rvec_to_euler(rvec)
-
-                print(
-                    f"[Marker {marker_id}] "
-                    f"Pos (m): x={tvec[0][0]:.3f}, y={tvec[0][1]:.3f}, z={tvec[0][2]:.3f} | "
-                    f"Euler (deg): roll={roll:.1f}, pitch={pitch:.1f}, yaw={yaw:.1f}"
+            # 找到了 ArUco
+            if ids is not None:
+                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                    corners, MARKER_LENGTH, camera_matrix, dist_coeffs
                 )
 
-        cv2.imshow("Aruco Detection", frame)
-        if cv2.waitKey(1) == 27:  # ESC
+                # 打印（只在检测时打印）
+                for i, marker_id in enumerate(ids.flatten()):
+                    r = rvecs[i][0]
+                    t = tvecs[i][0]
+                    yaw = get_yaw_from_rvec(r)
+
+                    print(
+                        f"[ID {marker_id}] "
+                        f"Pos: x={t[0]:.3f}, y={t[1]:.3f}  |  "
+                        f"Yaw={yaw:.1f}"
+                    )
+
+                # 更新缓存
+                last_ids = ids
+                last_corners = corners
+                last_rvecs = rvecs
+                last_tvecs = tvecs
+
+            else:
+                # ---------------------------
+                #   ArUco 消失：打印消失信息
+                # ---------------------------
+                if last_ids is not None:
+                    for marker_id in last_ids.flatten():
+                        print(f"[ID {marker_id}] disappeared")
+
+                # 清空缓存（画面不再绘制）
+                last_ids = None
+                last_corners = None
+                last_rvecs = None
+                last_tvecs = None
+
+        # ----------------------
+        #      绘 图 部 分
+        # ----------------------
+        if last_ids is not None:
+            cv2.aruco.drawDetectedMarkers(frame, last_corners, last_ids)
+
+            for i in range(len(last_ids)):
+                cv2.drawFrameAxes(
+                    frame,
+                    camera_matrix,
+                    dist_coeffs,
+                    last_rvecs[i],
+                    last_tvecs[i],
+                    0.05
+                )
+
+        cv2.imshow("Aruco (Lazy Detection + Print Control)", frame)
+        if cv2.waitKey(1) == 27:
             break
 
     cap.release()
