@@ -1,257 +1,373 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-import math, random, sys
+import math
+import random
+import sys
 from typing import List, Tuple, Optional, Set
 import pygame
 
-WIDTH, HEIGHT = 1200, 700
+# ---------------- Config ----------------
+WIDTH, HEIGHT = 1200, 720
 NUM_SQUARES = 3
 NUM_TRIANGLES = 3
 SQUARE_SIZE = 120
-TRI_SIZE = 130
+TRI_SIZE = 140
 
 REFRACTIVE_INDEX_AIR = 1.0
 REFRACTIVE_INDEX_SHAPE = 1.5
 
-MAX_BOUNCES = 80
+MAX_BOUNCES = 160
+EPS = 1e-8
+TINY = 1e-4  # 用于测试点移动，避免粘边
+SAFE_INF = 1e18
 
-BG = (20,20,30)
-COL_SQ_EDGE = (230,230,230)
-COL_TRI_EDGE = (255,200,120)
-COL_FILL = (80,120,160,70)
+# Colors
+BG = (18, 18, 28)
+COL_FILL = (80, 120, 160, 70)
+COL_SQ_EDGE = (220, 220, 220)
+COL_TRI_EDGE = (255, 200, 120)
+COL_AIR = (255, 220, 60)
+COL_INSIDE = (255, 100, 100)
 
-COL_AIR = (255,220,60)
-COL_INSIDE = (255,100,100)
-
-# --- vector utils ---
-def v_add(a,b): return (a[0]+b[0], a[1]+b[1])
-def v_sub(a,b): return (a[0]-b[0], a[1]-b[1])
-def v_mul(a,s): return (a[0]*s, a[1]*s)
-def v_dot(a,b): return a[0]*b[0] + a[1]*b[1]
-def v_len(a): return math.hypot(a[0],a[1])
+# ---------------- Vector utilities ----------------
+def v_add(a, b): return (a[0] + b[0], a[1] + b[1])
+def v_sub(a, b): return (a[0] - b[0], a[1] - b[1])
+def v_mul(a, s): return (a[0] * s, a[1] * s)
+def v_dot(a, b): return a[0] * b[0] + a[1] * b[1]
+def v_len(a): return math.hypot(a[0], a[1])
 def v_norm(a):
-    L=v_len(a)
-    return (a[0]/L,a[1]/L) if L>1e-9 else (0,0)
-def perp(a): return (-a[1],a[0])
+    L = v_len(a)
+    if L < 1e-12:
+        return (0.0, 0.0)
+    return (a[0] / L, a[1] / L)
+def perp(a): return (-a[1], a[0])
 
-# ---- ray / segment intersection
-def ray_seg(p,v,a,b):
-    r=v
-    s=v_sub(b,a)
-    rxs = r[0]*s[1]-r[1]*s[0]
-    if abs(rxs)<1e-12: return None
-    ap=v_sub(a,p)
-    t=(ap[0]*s[1]-ap[1]*s[0])/rxs
-    u=(ap[0]*r[1]-ap[1]*r[0])/rxs
-    return (t,u)
+# ---------------- Safety checks ----------------
+def is_valid_number(x):
+    return isinstance(x, (int, float)) and (not math.isnan(x)) and (not math.isinf(x))
 
-# ---- snell
-def refract_or_reflect(v,n,n1,n2):
-    if v_dot(n,v)>0: n=v_mul(n,-1)
-    cos_i = -v_dot(n,v)
-    ratio = n1/n2
-    sin_t2 = ratio**2*(1-cos_i*cos_i)
-    if sin_t2>1:
-        # total reflection
-        r = v_sub(v, v_mul(n,2*v_dot(v,n)))
-        return ("reflect",v_norm(r))
-    cos_t = math.sqrt(max(0,1-sin_t2))
-    tdir = v_add(v_mul(v,ratio), v_mul(n, ratio*cos_i - cos_t))
-    return ("refract", v_norm(tdir))
+def is_valid_point(p):
+    if not isinstance(p, (tuple, list)) or len(p) != 2:
+        return False
+    return is_valid_number(p[0]) and is_valid_number(p[1])
 
-# --- shapes ---
-def make_square(cx,cy,size,ang):
-    h=size/2
-    pts=[(-h,-h),(h,-h),(h,h),(-h,h)]
-    ca,sa=math.cos(ang),math.sin(ang)
-    out=[]
-    for x,y in pts:
-        rx=x*ca - y*sa
-        ry=x*sa + y*ca
-        out.append((cx+rx,cy+ry))
-    return out
+# ---------------- Geometry helpers ----------------
+def ray_segment_intersection(p, v, a, b) -> Optional[Tuple[float, float]]:
+    r = v
+    s = v_sub(b, a)
+    rxs = r[0] * s[1] - r[1] * s[0]
+    if abs(rxs) < 1e-12:
+        return None
+    ap = v_sub(a, p)
+    t = (ap[0] * s[1] - ap[1] * s[0]) / rxs
+    u = (ap[0] * r[1] - ap[1] * r[0]) / rxs
+    return (t, u)
 
-def make_triangle(cx,cy,size,ang):
-    # 等边三角形
-    h=size*math.sqrt(3)/2
-    pts=[(0,-h/2),(size/2,h/2),(-size/2,h/2)]
-    ca,sa=math.cos(ang),math.sin(ang)
-    out=[]
-    for x,y in pts:
-        rx=x*ca - y*sa
-        ry=x*sa + y*ca
-        out.append((cx+rx,cy+ry))
-    return out
+def point_in_poly(pt, poly) -> bool:
+    x, y = pt
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        # avoid division by zero
+        if ((y1 > y) != (y2 > y)):
+            denom = (y2 - y1)
+            if abs(denom) < 1e-12:
+                continue
+            xint = (x2 - x1) * (y - y1) / denom + x1
+            if x < xint:
+                inside = not inside
+    return inside
 
 def poly_aabb(poly):
-    xs=[p[0] for p in poly]; ys=[p[1] for p in poly]
-    return (min(xs),min(ys),max(xs),max(ys))
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    return (min(xs), min(ys), max(xs), max(ys))
 
-def overlap(a,b):
-    return not (a[2]<b[0] or a[0]>b[2] or a[3]<b[1] or a[1]>b[3])
+def aabb_overlap(a, b):
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
 
-# --- outward normal ---
-def outward_normal(a,b,poly):
-    mid=((a[0]+b[0])*0.5, (a[1]+b[1])*0.5)
-    cx=sum(p[0] for p in poly)/len(poly)
-    cy=sum(p[1] for p in poly)/len(poly)
-    to_center=v_sub((cx,cy),mid)
-    n=v_norm(perp(v_sub(b,a)))
-    if v_dot(n,to_center)>0:
-        n=v_mul(n,-1)
+# ---------------- Shape makers ----------------
+def make_rotated_square(cx, cy, size, angle):
+    h = size / 2.0
+    pts = [(-h, -h), (h, -h), (h, h), (-h, h)]
+    ca = math.cos(angle); sa = math.sin(angle)
+    out = []
+    for x, y in pts:
+        rx = x * ca - y * sa
+        ry = x * sa + y * ca
+        out.append((cx + rx, cy + ry))
+    return out
+
+def make_rotated_triangle(cx, cy, size, angle):
+    # 等边三角形，基于边长 size
+    h = size * math.sqrt(3) / 2.0
+    pts = [(0, -h / 3.0 * 2.0 + h/3.0), (size / 2.0, h * 2.0 / 3.0 - h/3.0), (-size / 2.0, h * 2.0 / 3.0 - h/3.0)]
+    # simpler: use centered approx triangle
+    pts = [(0, -h * 2/3), (size/2, h/3), (-size/2, h/3)]
+    ca = math.cos(angle); sa = math.sin(angle)
+    out = []
+    for x, y in pts:
+        rx = x * ca - y * sa
+        ry = x * sa + y * ca
+        out.append((cx + rx, cy + ry))
+    return out
+
+# ---------------- Outward normal ----------------
+def outward_normal(a, b, poly):
+    mid = ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5)
+    cx = sum(p[0] for p in poly) / len(poly)
+    cy = sum(p[1] for p in poly) / len(poly)
+    to_center = v_sub((cx, cy), mid)
+    n = v_norm(perp(v_sub(b, a)))
+    # if n points toward interior, flip
+    if v_dot(n, to_center) > 0:
+        n = v_mul(n, -1.0)
     return n
 
-# --- generate shapes ---
-def generate_shapes():
-    shapes=[]
-    margin=100
-    tries=0
+# ---------------- Snell / reflection (stable) ----------------
+def refract_or_reflect(v, n, n1, n2):
+    # ensure n opposes v
+    if v_dot(n, v) > 0:
+        n = v_mul(n, -1.0)
+    cos_i = -v_dot(n, v)
+    ratio = n1 / n2
+    # clamp numeric
+    cos_i = max(-1.0, min(1.0, cos_i))
+    sin_t2 = ratio * ratio * max(0.0, 1.0 - cos_i * cos_i)
+    if sin_t2 > 1.0 - 1e-12:
+        # total internal reflection
+        refl = v_sub(v, v_mul(n, 2.0 * v_dot(v, n)))
+        return ("reflect", v_norm(refl))
+    cos_t = math.sqrt(max(0.0, 1.0 - sin_t2))
+    term1 = v_mul(v, ratio)
+    term2 = v_mul(n, (ratio * cos_i - cos_t))
+    tdir = v_add(term1, term2)
+    return ("refract", v_norm(tdir))
 
-    # square + triangle count
-    target = NUM_SQUARES+NUM_TRIANGLES
-
-    while len(shapes)<target:
-        tries+=1
-        if tries>8000: break
-
-        is_square = (len(shapes)<NUM_SQUARES)
-        if is_square:
-            size=SQUARE_SIZE
-            ang=random.uniform(0,math.pi*2)
-            cx=random.uniform(margin,WIDTH-margin)
-            cy=random.uniform(margin,HEIGHT-margin)
-            poly=make_square(cx,cy,size,ang)
+# ---------------- Generate non-overlapping shapes ----------------
+def generate_shapes(num_sq, num_tri, sq_size, tri_size, w, h, seed=None):
+    if seed is not None:
+        random.seed(seed)
+    shapes = []
+    margin = 100
+    tries = 0
+    target = num_sq + num_tri
+    # place squares first then triangles (could mix)
+    placed_sq = 0; placed_tri = 0
+    while len(shapes) < target and tries < 20000:
+        tries += 1
+        if placed_sq < num_sq:
+            is_square = True
+            size = sq_size
         else:
-            size=TRI_SIZE
-            ang=random.uniform(0,math.pi*2)
-            cx=random.uniform(margin,WIDTH-margin)
-            cy=random.uniform(margin,HEIGHT-margin)
-            poly=make_triangle(cx,cy,size,ang)
-
-        box=poly_aabb(poly)
-
-        ok=True
+            is_square = False
+            size = tri_size
+        ang = random.uniform(0, math.pi * 2)
+        cx = random.uniform(margin, w - margin)
+        cy = random.uniform(margin, h - margin)
+        poly = make_rotated_square(cx, cy, size, ang) if is_square else make_rotated_triangle(cx, cy, size, ang)
+        aabb = poly_aabb(poly)
+        ok = True
         for s in shapes:
-            if overlap(box,s["aabb"]):
-                ok=False
-                break
-        if not ok: continue
-
-        shapes.append({"poly":poly,"aabb":box,"is_square":is_square})
+            if aabb_overlap(aabb, s["aabb"]):
+                ok = False; break
+        if not ok:
+            continue
+        shapes.append({"poly": poly, "aabb": aabb, "is_square": is_square})
+        if is_square: placed_sq += 1
+        else: placed_tri += 1
+        # ensure we switch to triangles after squares placed
+        if placed_sq >= num_sq and placed_tri < num_tri:
+            pass
     return shapes
 
-# --- trace ray ---
-def trace_ray(origin,dir,shapes):
-    p=origin
-    v=v_norm(dir)
-    segments=[]
-    inside:set[int]=set()
+# ---------------- Ray tracer (stable) ----------------
+def trace_ray(origin, direction, shapes):
+    segments = []
+    p = origin
+    v = v_norm(direction)
+    if v == (0.0, 0.0):
+        return segments
 
-    # edges
-    edges=[]
-    for i,sh in enumerate(shapes):
-        poly=sh["poly"]
-        n=len(poly)
-        for j in range(n):
-            a=poly[j]
-            b=poly[(j+1)%n]
-            edges.append((a,b,i))
+    # build edge list
+    edges = []
+    for i, sh in enumerate(shapes):
+        poly = sh["poly"]
+        for j in range(len(poly)):
+            a = poly[j]; b = poly[(j + 1) % len(poly)]
+            edges.append((a, b, i))
+
+    # initial inside set based on tiny step from origin
+    inside_set: Set[int] = set()
+    for i, sh in enumerate(shapes):
+        testp = v_add(p, v_mul(v, TINY))
+        if point_in_poly(testp, sh["poly"]):
+            inside_set.add(i)
 
     for _ in range(MAX_BOUNCES):
-        hitE=None; hitT=1e18
-        for (a,b,pid) in edges:
-            r=ray_seg(p,v,a,b)
-            if not r: continue
-            t,u=r
-            if t<1e-6 or u<0 or u>1: continue
-            if t<hitT:
-                hitT=t; hitE=(a,b,pid)
-        if not hitE:
-            # exit
-            tx=(WIDTH-p[0])/v[0] if v[0]>0 else 1e18
-            ty=(HEIGHT-p[1])/v[1] if v[1]>0 else 1e18
-            tmin=min(tx,ty)
-            endp=v_add(p,v_mul(v,tmin))
-            segments.append((p,endp, len(inside)>0))
+        # find nearest intersection
+        nearest_t = float("inf")
+        nearest_edge = None
+        for a, b, pid in edges:
+            res = ray_segment_intersection(p, v, a, b)
+            if res is None:
+                continue
+            t, u = res
+            if t <= EPS:
+                continue
+            if u < -1e-9 or u > 1 + 1e-9:
+                continue
+            if t < nearest_t:
+                nearest_t = t
+                nearest_edge = (a, b, pid)
+        if nearest_edge is None:
+            # compute t to exit screen box robustly
+            t_candidates = []
+            if abs(v[0]) > 1e-9:
+                if v[0] > 0:
+                    t_candidates.append((WIDTH + 50 - p[0]) / v[0])
+                else:
+                    t_candidates.append((-50 - p[0]) / v[0])
+            if abs(v[1]) > 1e-9:
+                if v[1] > 0:
+                    t_candidates.append((HEIGHT + 50 - p[1]) / v[1])
+                else:
+                    t_candidates.append((-50 - p[1]) / v[1])
+            if not t_candidates:
+                break
+            t_exit = min(tc for tc in t_candidates if tc > 0) if any(tc > 0 for tc in t_candidates) else max(t_candidates)
+            if not is_valid_number(t_exit) or t_exit > SAFE_INF:
+                break
+            endp = v_add(p, v_mul(v, t_exit))
+            segments.append((p, endp, len(inside_set) > 0))
             break
 
-        a,b,pid = hitE
-        inter=v_add(p,v_mul(v,hitT))
-        segments.append((p,inter, len(inside)>0))
+        a, b, pid = nearest_edge
+        inter = v_add(p, v_mul(v, nearest_t))
+        segments.append((p, inter, len(inside_set) > 0))
 
-        poly=shapes[pid]["poly"]
-        n=outward_normal(a,b,poly)
+        # determine if ray was inside this polygon before hitting the edge
+        pre_test = v_sub(inter, v_mul(v, TINY))
+        was_inside = point_in_poly(pre_test, shapes[pid]["poly"])
 
-        entering = pid not in inside
-        n1 = REFRACTIVE_INDEX_AIR if entering else REFRACTIVE_INDEX_SHAPE
-        n2 = REFRACTIVE_INDEX_SHAPE if entering else REFRACTIVE_INDEX_AIR
+        # choose n1,n2 accordingly
+        if was_inside:
+            n1 = REFRACTIVE_INDEX_SHAPE; n2 = REFRACTIVE_INDEX_AIR
+        else:
+            n1 = REFRACTIVE_INDEX_AIR; n2 = REFRACTIVE_INDEX_SHAPE
 
-        mode,newv = refract_or_reflect(v,n,n1,n2)
-        if mode=="refract":
-            if entering: inside.add(pid)
-            else: inside.discard(pid)
+        nvec = outward_normal(a, b, shapes[pid]["poly"])
 
-        p=v_add(inter,v_mul(newv,1e-4))
-        v=newv
+        mode, newv = refract_or_reflect(v, nvec, n1, n2)
+
+        # protect against invalid newv
+        if not (is_valid_number(newv[0]) and is_valid_number(newv[1])):
+            # fallback to mirror reflection
+            refl = v_sub(v, v_mul(nvec, 2.0 * v_dot(v, nvec)))
+            newv = v_norm(refl)
+        # avoid near-zero vector
+        if v_len(newv) < 1e-12:
+            refl = v_sub(v, v_mul(nvec, 2.0 * v_dot(v, nvec)))
+            newv = v_norm(refl)
+        newv = v_norm(newv)
+
+        # update inside_set according to post-test point (robust)
+        post_test = v_add(inter, v_mul(newv, TINY))
+        if point_in_poly(post_test, shapes[pid]["poly"]):
+            inside_set.add(pid)
+        else:
+            inside_set.discard(pid)
+
+        # advance slightly and continue
+        p = v_add(inter, v_mul(newv, TINY))
+        v = newv
+
+        # safety bounds
+        if p[0] < -500 or p[0] > WIDTH + 500 or p[1] < -500 or p[1] > HEIGHT + 500:
+            break
 
     return segments
 
-# --- draw ---
-def draw_scene(screen, shapes, rays):
-    screen.fill(BG)
-    surf=pygame.Surface((WIDTH,HEIGHT),pygame.SRCALPHA)
+# ---------------- Drawing ----------------
+def safe_draw_circle(surface, color, point, radius):
+    if is_valid_point(point):
+        try:
+            pygame.draw.circle(surface, color, (int(point[0]), int(point[1])), radius)
+        except Exception:
+            pass
 
+def draw_scene(screen, shapes, all_rays):
+    screen.fill(BG)
+    alpha_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     for sh in shapes:
-        pygame.draw.polygon(surf, COL_FILL, sh["poly"])
-    screen.blit(surf,(0,0))
+        pygame.draw.polygon(alpha_surf, COL_FILL, sh["poly"])
+    screen.blit(alpha_surf, (0, 0))
 
     for sh in shapes:
         col = COL_SQ_EDGE if sh["is_square"] else COL_TRI_EDGE
-        pygame.draw.polygon(screen, col, sh["poly"],2)
+        pygame.draw.polygon(screen, col, sh["poly"], 2)
 
-    for segs in rays:
-        for a,b,inside in segs:
+    for segs in all_rays:
+        for a, b, inside in segs:
+            if not is_valid_point(a) or not is_valid_point(b):
+                continue
             col = COL_INSIDE if inside else COL_AIR
-            pygame.draw.line(screen,col,a,b,3)
-            pygame.draw.circle(screen,col,(int(b[0]),int(b[1])),3)
-
+            try:
+                pygame.draw.line(screen, col, a, b, 3)
+            except Exception:
+                continue
+            safe_draw_circle(screen, col, b, 3)
     pygame.display.flip()
 
-
-# --- main ---
+# ---------------- Main ----------------
 def main():
     pygame.init()
-    screen=pygame.display.set_mode((WIDTH,HEIGHT))
-    pygame.display.set_caption("Squares + Triangles Refraction")
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Stable Refraction Simulation")
 
-    shapes=generate_shapes()
-    direction=(1,0)
+    shapes = generate_shapes(NUM_SQUARES, NUM_TRIANGLES, SQUARE_SIZE, TRI_SIZE, WIDTH, HEIGHT, seed=None)
 
-    sources=[
-        (0, HEIGHT*0.25),
-        (0, HEIGHT*0.50),
-        (0, HEIGHT*0.75)
+    # three left-side rays
+    sources = [
+        (0.0, HEIGHT * 0.25),
+        (0.0, HEIGHT * 0.50),
+        (0.0, HEIGHT * 0.75)
     ]
+    direction = (1.0, 0.0)
 
-    running=True
-    clock=pygame.time.Clock()
+    clock = pygame.time.Clock()
+    running = True
+    recompute = True
+    all_rays = []
 
     while running:
-        for e in pygame.event.get():
-            if e.type==pygame.QUIT: running=False
-            if e.type==pygame.KEYDOWN:
-                if e.key==pygame.K_r:
-                    shapes=generate_shapes()
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                running = False
+            elif ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_r:
+                    shapes = generate_shapes(NUM_SQUARES, NUM_TRIANGLES, SQUARE_SIZE, TRI_SIZE, WIDTH, HEIGHT, seed=None)
+                    recompute = True
+                elif ev.key == pygame.K_ESCAPE:
+                    running = False
+            elif ev.type == pygame.MOUSEBUTTONDOWN:
+                if ev.button == 1:
+                    # move middle source to click Y (interactive)
+                    mx, my = ev.pos
+                    sources[1] = (0.0, float(my))
+                    recompute = True
 
-        rays=[]
-        for sx,sy in sources:
-            rays.append(trace_ray((sx,sy),direction,shapes))
+        if recompute:
+            all_rays = []
+            for sx, sy in sources:
+                rayseg = trace_ray((sx, sy), direction, shapes)
+                all_rays.append(rayseg)
+            recompute = False
 
-        draw_scene(screen, shapes, rays)
-        clock.tick(30)
+        draw_scene(screen, shapes, all_rays)
+        clock.tick(60)
 
     pygame.quit()
     sys.exit()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
