@@ -28,6 +28,9 @@ COL_AIR_LEFT = (255, 220, 60)
 COL_INSIDE_LEFT = (255, 100, 100)
 COL_AIR_RIGHT = (60, 250, 220)
 COL_INSIDE_RIGHT = (100, 160, 255)
+# Fresnel reflection colors
+COL_REFLECT_LEFT = (255, 180, 0)      # 左侧光线的反射光（亮橙）
+COL_REFLECT_RIGHT = (0, 180, 255)     # 右侧光线的反射光（亮蓝）
 
 # ---------------- Grid Config ----------------
 GRID_SIZE = 30   # 每个格子尺寸，你可改成 20 / 40 / 60 等
@@ -189,92 +192,103 @@ def generate_shapes(num_sq, num_tri, sq_size, tri_size, w, h, seed=None):
 
 # ---------------- Ray tracer ----------------
 def trace_ray(origin, direction, shapes):
-    segments = []
-    p = origin
-    v = v_norm(direction)
-    if v == (0.0, 0.0):
-        return segments
+    """
+    返回：[(start, end, inside, is_reflect_branch), ...]
+    is_reflect_branch=True → 使用反射颜色绘制
+    """
+    out_segments = []
+    stack = [(origin, v_norm(direction), False)]   # (p, v, is_reflect_branch)
 
-    edges = []
-    for i, sh in enumerate(shapes):
-        poly = sh["poly"]
-        for j in range(len(poly)):
-            a = poly[j]
-            b = poly[(j + 1) % len(poly)]
-            edges.append((a, b, i))
+    while stack:
+        p, v, is_reflect = stack.pop()
 
-    inside_set: Set[int] = set()
-    for i, sh in enumerate(shapes):
-        testp = v_add(p, v_mul(v, TINY))
-        if point_in_poly(testp, sh["poly"]):
-            inside_set.add(i)
+        segments = []
+        v = v_norm(v)
+        if v == (0.0, 0.0):
+            continue
 
-    for _ in range(MAX_BOUNCES):
-        nearest_t = float("inf")
-        nearest_edge = None
-        for a, b, pid in edges:
-            res = ray_segment_intersection(p, v, a, b)
-            if res is None:
-                continue
-            t, u = res
-            if t <= EPS:
-                continue
-            if not (0.0 <= u <= 1.0):
-                continue
-            if t < nearest_t:
-                nearest_t = t
-                nearest_edge = (a, b, pid)
-        if nearest_edge is None:
-            t_candidates = []
-            if abs(v[0]) > 1e-9:
-                t_candidates.append((WIDTH + 50 - p[0]) / v[0] if v[0] > 0 else (-50 - p[0]) / v[0])
-            if abs(v[1]) > 1e-9:
-                t_candidates.append((HEIGHT + 50 - p[1]) / v[1] if v[1] > 0 else (-50 - p[1]) / v[1])
-            if not t_candidates:
+        # 构建边列表
+        edges = []
+        for pid, sh in enumerate(shapes):
+            poly = sh["poly"]
+            for j in range(len(poly)):
+                a = poly[j]
+                b = poly[(j + 1) % len(poly)]
+                edges.append((a, b, pid))
+
+        # 初始 inside 判断
+        inside_set = set()
+        for pid, sh in enumerate(shapes):
+            if point_in_poly(v_add(p, v_mul(v, TINY)), sh["poly"]):
+                inside_set.add(pid)
+
+        for _ in range(MAX_BOUNCES):
+            nearest_t = float("inf")
+            nearest_edge = None
+
+            # 找最近边
+            for a, b, pid in edges:
+                res = ray_segment_intersection(p, v, a, b)
+                if res is None:
+                    continue
+                t, u = res
+                if t <= EPS or not (0 <= u <= 1):
+                    continue
+                if t < nearest_t:
+                    nearest_t = t
+                    nearest_edge = (a, b, pid)
+
+            # 出屏
+            if nearest_edge is None:
+                t_candidates = []
+                if abs(v[0]) > 1e-9:
+                    t_candidates.append((WIDTH + 50 - p[0]) / v[0] if v[0] > 0 else (-50 - p[0]) / v[0])
+                if abs(v[1]) > 1e-9:
+                    t_candidates.append((HEIGHT + 50 - p[1]) / v[1] if v[1] > 0 else (-50 - p[1]) / v[1])
+
+                if t_candidates:
+                    t_exit = min(tc for tc in t_candidates if tc > 0)
+                    endp = v_add(p, v_mul(v, t_exit))
+                    segments.append((p, endp, len(inside_set) > 0, is_reflect))
                 break
-            t_exit = min(tc for tc in t_candidates if tc > 0)
-            endp = v_add(p, v_mul(v, t_exit))
-            segments.append((p, endp, len(inside_set) > 0))
-            break
 
-        a, b, pid = nearest_edge
-        inter = v_add(p, v_mul(v, nearest_t))
-        segments.append((p, inter, len(inside_set) > 0))
+            # 撞到最近边
+            a, b, pid = nearest_edge
+            inter = v_add(p, v_mul(v, nearest_t))
+            segments.append((p, inter, len(inside_set) > 0, is_reflect))
 
-        pre_test = v_sub(inter, v_mul(v, TINY))
-        was_inside = point_in_poly(pre_test, shapes[pid]["poly"])
+            was_inside = point_in_poly(v_sub(inter, v_mul(v, TINY)), shapes[pid]["poly"])
+            n1 = REFRACTIVE_INDEX_SHAPE if was_inside else REFRACTIVE_INDEX_AIR
+            n2 = REFRACTIVE_INDEX_AIR if was_inside else REFRACTIVE_INDEX_SHAPE
 
-        if was_inside:
-            n1 = REFRACTIVE_INDEX_SHAPE
-            n2 = REFRACTIVE_INDEX_AIR
-        else:
-            n1 = REFRACTIVE_INDEX_AIR
-            n2 = REFRACTIVE_INDEX_SHAPE
+            nvec = outward_normal(a, b, shapes[pid]["poly"])
 
-        nvec = outward_normal(a, b, shapes[pid]["poly"])
-        mode, newv = refract_or_reflect(v, nvec, n1, n2)
+            # Snell 分支
+            mode, newv = refract_or_reflect(v, nvec, n1, n2)
 
-        if not (is_valid_number(newv[0]) and is_valid_number(newv[1])):
-            refl = v_sub(v, v_mul(nvec, 2 * v_dot(v, nvec)))
-            newv = v_norm(refl)
-        if v_len(newv) < 1e-12:
-            refl = v_sub(v, v_mul(nvec, 2 * v_dot(v, nvec)))
-            newv = v_norm(refl)
-        newv = v_norm(newv)
+            # === ⭐ 新增：反射分光（只在入射时产生：n1 < n2）===
+            if not was_inside:  
+                refl_dir = v_sub(v, v_mul(nvec, 2 * v_dot(v, nvec)))
+                refl_dir = v_norm(refl_dir)
+                stack.append((v_add(inter, v_mul(refl_dir, TINY)), refl_dir, True))
 
-        post_test = v_add(inter, v_mul(newv, TINY))
-        if point_in_poly(post_test, shapes[pid]["poly"]):
-            inside_set.add(pid)
-        else:
-            inside_set.discard(pid)
+            # === 折射或全反射 ===
+            p = v_add(inter, v_mul(newv, TINY))
+            v = newv
 
-        p = v_add(inter, v_mul(newv, TINY))
-        v = newv
+            # inside 更新
+            if point_in_poly(v_add(inter, v_mul(v, TINY)), shapes[pid]["poly"]):
+                inside_set.add(pid)
+            else:
+                inside_set.discard(pid)
 
-        if p[0] < -500 or p[0] > WIDTH + 500 or p[1] < -500 or p[1] > HEIGHT + 500:
-            break
+            # 若光线飞到很远则停止
+            if p[0] < -200 or p[0] > WIDTH + 200 or p[1] < -200 or p[1] > HEIGHT + 200:
+                break
 
-    return segments
+        out_segments += segments
+
+    return out_segments
 
 # ---------------- Drawing ----------------
 def safe_draw_circle(surface, color, point, radius):
@@ -348,14 +362,20 @@ def draw_scene(screen, shapes, all_rays):
         first_start = segs[0][0]
         from_right = first_start[0] > WIDTH * 0.5
 
-        for a, b, inside in segs:
+        for a, b, inside, is_reflect in segs:
             if not is_valid_point(a) or not is_valid_point(b):
                 continue
 
             if from_right:
-                col = COL_INSIDE_RIGHT if inside else COL_AIR_RIGHT
+                if is_reflect:
+                    col = COL_REFLECT_RIGHT
+                else:
+                    col = COL_INSIDE_RIGHT if inside else COL_AIR_RIGHT
             else:
-                col = COL_INSIDE_LEFT if inside else COL_AIR_LEFT
+                if is_reflect:
+                    col = COL_REFLECT_LEFT
+                else:
+                    col = COL_INSIDE_LEFT if inside else COL_AIR_LEFT
 
             pygame.draw.line(screen, col, a, b, 3)
             safe_draw_circle(screen, col, b, 3)
@@ -413,7 +433,14 @@ def main():
                 all_rays.append(rays)
 
                 # === 新增：标记所有格子 ===
-                for a, b, _inside in rays:
+                for seg in rays:
+                    if not isinstance(seg, (tuple, list)):
+                        continue
+                    if len(seg) < 3:
+                        continue
+
+                    a, b, inside = seg[:3]    # 自动裁剪为 3 个值
+
                     if is_valid_point(a) and is_valid_point(b):
                         mark_segment_on_grid(a, b)
 
