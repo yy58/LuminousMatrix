@@ -126,7 +126,8 @@ Below are the full technical architectures for the system, integrated into the c
 
 ---
 
-#  Sound Engine (Max/MSP)
+# Sound Engine (Max/MSP)
+
 The Max patch translates real-time OSC light data into a multilayer sonic texture.
 
 
