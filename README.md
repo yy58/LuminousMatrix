@@ -4,7 +4,7 @@
 
 ## Overview
 
-*LuminousMatrix * speculates on a universal communication system shared by intelligent civilisations across the cosmos.  
+*LuminousMatrix* speculates on a universal communication system shared by intelligent civilisations across the cosmos.  
 In this fictional framework, no species transmits language directly.  
 Instead, **light itself becomes the medium of inscription**:  
 its refractions, reflections, and trajectories that write information into space.
@@ -76,11 +76,7 @@ Arecibo becomes not a relic, but a **template for generating new cosmic transmis
 
 ---
 
-# Interaction & System Flow
 
-Below are the full technical architectures for the system, integrated into the conceptual narrative.
-
----
 
 #  System Architecture
 
@@ -121,3 +117,19 @@ The Max patch translates real-time OSC light data into a multilayer sonic textur
       ┌───────────────────────────────────┐
       │  AMBIENT DELAY NETWORK + REVERB   │ ← x-modulated delay time
       └───────────────────────────────────┘
+
+---
+
+## Interaction & Experience
+- Participants are **not just rotating prisms** — they are activating a dormant communication protocol.
+- **Light writes the message**, **sound reads it back**, and the **pixel matrix displays a real-time transmission**.
+- Every gesture creates a new, unique cosmic message — a signal sent toward the unknown.
+- Communication becomes **evidence of existence**, not merely a functional exchange.
+
+---
+
+## References
+- Arecibo Message (1974)
+- Concepts of non-linguistic communication
+- Luminous Matrix Language (hypothetical)
+- Granular synthesis, ambient sound design
