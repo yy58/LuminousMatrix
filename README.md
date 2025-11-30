@@ -128,8 +128,22 @@ The Max patch translates real-time OSC light data into a multilayer sonic textur
 
 ---
 
+## Technical Stack
+- **Python**: Binary matrix encoding, pixel visualizer
+- **OpenCV / cv.jit / jit.grab**: Camera tracking, including **Aruco marker tracking**
+- **Max/MSP**: Real-time sound synthesis
+- **OSC**: Communication between Python and Max
+
+---
+
 ## References
 - Arecibo Message (1974)
 - Concepts of non-linguistic communication
 - Luminous Matrix Language (hypothetical)
 - Granular synthesis, ambient sound design
+
+---
+
+## Authors
+- **Huang Chuteng**
+- **Guo Yueyue**
