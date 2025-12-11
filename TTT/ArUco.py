@@ -10,7 +10,6 @@ def get_yaw_from_rvec(rvec):
     yaw = math.atan2(R[1, 0], R[0, 0])
     return np.degrees(yaw)
 
-
 def main():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
@@ -24,8 +23,6 @@ def main():
 
     last_ids = None
     last_corners = None
-    last_rvecs = None
-    last_tvecs = None
 
     frame_id = 0
 
@@ -33,6 +30,7 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+        # frame = cv2.flip(frame, 1)
 
         frame_id += 1
         need_detect = False
@@ -54,27 +52,56 @@ def main():
 
             # 找到了 ArUco
             if ids is not None:
-                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, MARKER_LENGTH, camera_matrix, dist_coeffs
-                )
+                # # 修正角点顺序（因为使用了水平镜像）
+                # for i in range(len(corners)):
+                #     c = corners[i][0]
+                #     corners[i][0] = np.array([c[1], c[0], c[3], c[2]])
+
+                half = MARKER_LENGTH / 2
+                obj_points = np.array([
+                    [-half,  half, 0],
+                    [ half,  half, 0],
+                    [ half, -half, 0],
+                    [-half, -half, 0]
+                ], dtype=np.float32)
+
+                all_rvecs = []
+                all_tvecs = []
+
+                for c in corners:
+                    img_points = c[0].astype(np.float32)
+
+                    ok, rvec, tvec = cv2.solvePnP(
+                        obj_points,
+                        img_points,
+                        camera_matrix,
+                        dist_coeffs,
+                        flags=cv2.SOLVEPNP_ITERATIVE
+                    )
+
+                    all_rvecs.append(rvec.reshape(3, 1))
+                    all_tvecs.append(tvec.reshape(3, 1))
+
+                rvecs = all_rvecs
+                tvecs = all_tvecs
 
                 # 打印（只在检测时打印）
                 for i, marker_id in enumerate(ids.flatten()):
-                    r = rvecs[i][0]
-                    t = tvecs[i][0]
+                    corner = corners[i][0]
+                    u = float(np.mean(corner[:, 0]))
+                    v = float(np.mean(corner[:, 1]))
+                    r = rvecs[i]
                     yaw = get_yaw_from_rvec(r)
 
                     print(
                         f"[ID {marker_id}] "
-                        f"Pos: x={t[0]:.3f}, y={t[1]:.3f}  |  "
+                        f"Pos: x={u:.3f}, y={v:.3f}  |  "
                         f"Yaw={yaw:.1f}"
                     )
 
                 # 更新缓存
                 last_ids = ids
                 last_corners = corners
-                last_rvecs = rvecs
-                last_tvecs = tvecs
 
             else:
                 # ---------------------------
@@ -87,24 +114,12 @@ def main():
                 # 清空缓存（画面不再绘制）
                 last_ids = None
                 last_corners = None
-                last_rvecs = None
-                last_tvecs = None
 
         # ----------------------
         #      绘 图 部 分
         # ----------------------
         if last_ids is not None:
             cv2.aruco.drawDetectedMarkers(frame, last_corners, last_ids)
-
-            for i in range(len(last_ids)):
-                cv2.drawFrameAxes(
-                    frame,
-                    camera_matrix,
-                    dist_coeffs,
-                    last_rvecs[i],
-                    last_tvecs[i],
-                    0.05
-                )
 
         cv2.imshow("Aruco (Lazy Detection + Print Control)", frame)
         if cv2.waitKey(1) == 27:

@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional, Set
 import pygame
 
 # ---------------- Config ----------------
-WIDTH, HEIGHT = 1200, 720
+WIDTH, HEIGHT = 1600, 900
 NUM_SQUARES = 3
 NUM_TRIANGLES = 3
 SQUARE_SIZE = 120
