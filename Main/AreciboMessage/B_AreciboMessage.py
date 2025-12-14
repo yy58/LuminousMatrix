@@ -4,6 +4,9 @@ import sys
 from typing import List, Tuple, Optional, Set
 import pygame
 
+import zmq
+ZMQ_ARUCO_PORT = 5556
+
 # ---------------- Config ----------------
 WIDTH, HEIGHT = 1200, 500
 NUM_SQUARES = 3
@@ -193,10 +196,6 @@ def generate_shapes(num_sq, num_tri, sq_size, tri_size, w, h, seed=None):
 
 # ---------------- Ray tracer ----------------
 def trace_ray(origin, direction, shapes):
-    """
-    返回：[(start, end, inside, is_reflect_branch), ...]
-    is_reflect_branch=True → 使用反射颜色绘制
-    """
     out_segments = []
     stack = [(origin, v_norm(direction), False)]   # (p, v, is_reflect_branch)
 
@@ -382,13 +381,63 @@ def draw_scene(screen, shapes, all_rays):
 
     pygame.display.flip()
 
+
+# ---------- ArUco → Screen mapping ----------
+CAM_W = 640     # 你的摄像头分辨率（按 A 实际）
+CAM_H = 480
+def aruco_to_screen(x, y):
+    sx = x / CAM_W * WIDTH
+    sy = y / CAM_H * HEIGHT
+    return sx, sy
+
+def clamp_to_safe_region(x, y, margin=120):
+    x = max(margin, min(WIDTH - margin, x))
+    y = max(margin, min(HEIGHT - margin, y))
+    return x, y
+
+def shapes_from_aruco(aruco_list):
+    shapes = []
+
+    for item in aruco_list:
+        cx, cy = aruco_to_screen(item["x"], item["y"])
+        cx, cy = clamp_to_safe_region(cx, cy)
+        print("screen pos:", cx, cy)
+
+        ang = math.radians(item["yaw"])
+
+        marker_id = item["id"]
+
+        if marker_id in (0, 1, 2):
+            poly = make_rotated_triangle(cx, cy, TRI_SIZE, ang)
+            is_square = False
+        elif marker_id in (3, 4, 5):
+            poly = make_rotated_square(cx, cy, SQUARE_SIZE, ang)
+            is_square = True
+        else:
+            # 其他 ID：可选策略
+            continue
+
+        shapes.append({
+            "poly": poly,
+            "aabb": poly_aabb(poly),
+            "is_square": is_square
+        })
+
+    return shapes
+
 # ---------------- Main ----------------
-def main():
+def run():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Stable Refraction Simulation (Left + Right Rays)")
 
-    shapes = generate_shapes(NUM_SQUARES, NUM_TRIANGLES, SQUARE_SIZE, TRI_SIZE, WIDTH, HEIGHT)
+    context = zmq.Context()
+    aruco_sub = context.socket(zmq.SUB)
+    aruco_sub.connect("tcp://127.0.0.1:5556")  # 与 A 保持一致
+    aruco_sub.setsockopt_string(zmq.SUBSCRIBE, "")
+    aruco_sub.RCVTIMEO = 1   # 非阻塞
+
+    shapes = []
 
     # 左侧三条光线
     left_sources = [
@@ -412,17 +461,28 @@ def main():
     all_rays = []
 
     while running:
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                running = False
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_r:
-                    shapes = generate_shapes(NUM_SQUARES, NUM_TRIANGLES, SQUARE_SIZE, TRI_SIZE, WIDTH, HEIGHT)
-                    recompute = True
-                elif ev.key == pygame.K_ESCAPE:
+        for ev in pygame.event.get(): 
+            if ev.type == pygame.QUIT: 
+                running = False 
+            elif ev.type == pygame.KEYDOWN: 
+                if ev.key == pygame.K_ESCAPE: 
                     running = False
 
+        # -------- ZMQ receive aruco data --------
+        try:
+            aruco_list = aruco_sub.recv_pyobj()
+            if isinstance(aruco_list, list):
+                shapes = shapes_from_aruco(aruco_list)
+                recompute = True
+        except zmq.Again:
+            pass
+
         if recompute:
+            # === 清空光栅（否则会残留）===
+            for cx in range(GRID_COLS):
+                for cy in range(GRID_ROWS):
+                    grid_lit[cx][cy] = False
+
             all_rays = []
             for sx, sy in sources:
                 if sx < WIDTH * 0.5:
@@ -448,8 +508,11 @@ def main():
         draw_scene(screen, shapes, all_rays)
         clock.tick(60)
 
+    aruco_sub.close()
+    context.term()
+
     pygame.quit()
-    sys.exit()
+    return
 
 if __name__ == "__main__":
-    main()
+    run()
