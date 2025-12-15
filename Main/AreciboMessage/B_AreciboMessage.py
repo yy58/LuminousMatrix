@@ -37,11 +37,11 @@ COL_REFLECT_LEFT = (255, 0, 255)
 COL_REFLECT_RIGHT = (0, 0, 255)
 
 # ---------------- Grid Config ----------------
-GRID_SIZE = 30   # 每个格子尺寸，你可改成 20 / 40 / 60 等
+GRID_SIZE = 30   # The size of each grid cell
 GRID_COLS = WIDTH // GRID_SIZE
 GRID_ROWS = HEIGHT // GRID_SIZE
 
-# 亮格子布尔表：True=光线走过
+# Grid lit boolean table: True = light has passed
 grid_lit = [[False for _ in range(GRID_ROWS)] for _ in range(GRID_COLS)]
 
 # ---------------- Vector utilities ----------------
@@ -207,7 +207,7 @@ def trace_ray(origin, direction, shapes):
         if v == (0.0, 0.0):
             continue
 
-        # 构建边列表
+        # Create edge list
         edges = []
         for pid, sh in enumerate(shapes):
             poly = sh["poly"]
@@ -216,7 +216,7 @@ def trace_ray(origin, direction, shapes):
                 b = poly[(j + 1) % len(poly)]
                 edges.append((a, b, pid))
 
-        # 初始 inside 判断
+        # Initial inside check
         inside_set = set()
         for pid, sh in enumerate(shapes):
             if point_in_poly(v_add(p, v_mul(v, TINY)), sh["poly"]):
@@ -226,7 +226,7 @@ def trace_ray(origin, direction, shapes):
             nearest_t = float("inf")
             nearest_edge = None
 
-            # 找最近边
+            # Find nearest intersection
             for a, b, pid in edges:
                 res = ray_segment_intersection(p, v, a, b)
                 if res is None:
@@ -238,7 +238,7 @@ def trace_ray(origin, direction, shapes):
                     nearest_t = t
                     nearest_edge = (a, b, pid)
 
-            # 出屏
+            # Out of bounds check
             if nearest_edge is None:
                 t_candidates = []
                 if abs(v[0]) > 1e-9:
@@ -252,7 +252,7 @@ def trace_ray(origin, direction, shapes):
                     segments.append((p, endp, len(inside_set) > 0, is_reflect))
                 break
 
-            # 撞到最近边
+            # The nearest intersection found
             a, b, pid = nearest_edge
             inter = v_add(p, v_mul(v, nearest_t))
             segments.append((p, inter, len(inside_set) > 0, is_reflect))
@@ -263,26 +263,26 @@ def trace_ray(origin, direction, shapes):
 
             nvec = outward_normal(a, b, shapes[pid]["poly"])
 
-            # Snell 分支
+            # Snell's law
             mode, newv = refract_or_reflect(v, nvec, n1, n2)
 
-            # === ⭐ 新增：反射分光（只在入射时产生：n1 < n2）===
+            # Reflection splitting
             if not was_inside:  
                 refl_dir = v_sub(v, v_mul(nvec, 2 * v_dot(v, nvec)))
                 refl_dir = v_norm(refl_dir)
                 stack.append((v_add(inter, v_mul(refl_dir, TINY)), refl_dir, True))
 
-            # === 折射或全反射 ===
+            # Refraction or total internal reflection
             p = v_add(inter, v_mul(newv, TINY))
             v = newv
 
-            # inside 更新
+            # Update inside
             if point_in_poly(v_add(inter, v_mul(v, TINY)), shapes[pid]["poly"]):
                 inside_set.add(pid)
             else:
                 inside_set.discard(pid)
 
-            # 若光线飞到很远则停止
+            # If the light is too far out of bounds, stop
             if p[0] < -200 or p[0] > WIDTH + 200 or p[1] < -200 or p[1] > HEIGHT + 200:
                 break
 
@@ -301,25 +301,25 @@ def safe_draw_circle(surface, color, point, radius):
 def mark_segment_on_grid(a, b):
     x1, y1 = a; x2, y2 = b
 
-    # 保证顺序
+    # Then order of points
     if x1 > x2:
         x1, x2 = x2, x1
         y1, y2 = y2, y1
 
-    # 包围盒 → 降低计算量
+    # Bounding box → reduce computation
     min_c = max(0, int(min(x1, x2) // GRID_SIZE))
     max_c = min(GRID_COLS - 1, int(max(x1, x2) // GRID_SIZE))
     min_r = max(0, int(min(y1, y2) // GRID_SIZE))
     max_r = min(GRID_ROWS - 1, int(max(y1, y2) // GRID_SIZE))
 
-    # 对范围内格子检测线段是否穿过（中心点投影法）
+    # Center point projection method
     for cx in range(min_c, max_c + 1):
         for cy in range(min_r, max_r + 1):
             gx = cx * GRID_SIZE + GRID_SIZE * 0.5
             gy = cy * GRID_SIZE + GRID_SIZE * 0.5
 
-            # 判断点(gx,gy)到线段的最小距离
-            # 若 < GRID_SIZE/2 即认为光线经过该格子
+            # Judge if the line segment is close enough to the grid cell center
+            # If < GRID_SIZE/2, consider the light passing through the cell
             px, py = gx, gy
             vx, vy = x2 - x1, y2 - y1
             wx, wy = px - x1, py - y1
@@ -333,9 +333,9 @@ def mark_segment_on_grid(a, b):
             if dx * dx + dy * dy <= (GRID_SIZE * 0.48) ** 2:
                 grid_lit[cx][cy] = True
 
-def draw_scene(screen, shapes, all_rays):
+def draw_scene(screen, shapes, all_rays, show_debug):
     screen.fill(BG)
-    # --------- 绘制网格背景：亮格子白、暗格子黑 ----------
+    # --------- Draw grid background: lit cells white, dark cells black ----------
     for cx in range(GRID_COLS):
         for cy in range(GRID_ROWS):
             color = (255, 255, 255) if grid_lit[cx][cy] else (0, 0, 0)
@@ -343,47 +343,49 @@ def draw_scene(screen, shapes, all_rays):
                 screen, color,
                 pygame.Rect(cx * GRID_SIZE, cy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
             )
+    if show_debug:
+        # --------- Draw the shapes ----------
+        alpha_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        for sh in shapes:
+            pygame.draw.polygon(alpha_surf, COL_FILL, sh["poly"])
+        screen.blit(alpha_surf, (0, 0))
 
-    alpha_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    for sh in shapes:
-        pygame.draw.polygon(alpha_surf, COL_FILL, sh["poly"])
-    screen.blit(alpha_surf, (0, 0))
+        for sh in shapes:
+            col = COL_SQ_EDGE if sh["is_square"] else COL_TRI_EDGE
+            pygame.draw.polygon(screen, col, sh["poly"], 2)
 
-    for sh in shapes:
-        col = COL_SQ_EDGE if sh["is_square"] else COL_TRI_EDGE
-        pygame.draw.polygon(screen, col, sh["poly"], 2)
-
-    for segs in all_rays:
-        if not segs:
-            continue
-
-        # 根据第一段判断光线源头（x 小=左边；x 大=右边）
-        first_start = segs[0][0]
-        from_right = first_start[0] > WIDTH * 0.5
-
-        for a, b, inside, is_reflect in segs:
-            if not is_valid_point(a) or not is_valid_point(b):
+        # --------- Draw the rays ----------
+        for segs in all_rays:
+            if not segs:
                 continue
 
-            if from_right:
-                if is_reflect:
-                    col = COL_REFLECT_RIGHT
-                else:
-                    col = COL_INSIDE_RIGHT if inside else COL_AIR_RIGHT
-            else:
-                if is_reflect:
-                    col = COL_REFLECT_LEFT
-                else:
-                    col = COL_INSIDE_LEFT if inside else COL_AIR_LEFT
+            # x small = left; x large = right
+            first_start = segs[0][0]
+            from_right = first_start[0] > WIDTH * 0.5
 
-            pygame.draw.line(screen, col, a, b, 3)
-            safe_draw_circle(screen, col, b, 3)
+            for a, b, inside, is_reflect in segs:
+                if not is_valid_point(a) or not is_valid_point(b):
+                    continue
+
+                if from_right:
+                    if is_reflect:
+                        col = COL_REFLECT_RIGHT
+                    else:
+                        col = COL_INSIDE_RIGHT if inside else COL_AIR_RIGHT
+                else:
+                    if is_reflect:
+                        col = COL_REFLECT_LEFT
+                    else:
+                        col = COL_INSIDE_LEFT if inside else COL_AIR_LEFT
+
+                pygame.draw.line(screen, col, a, b, 3)
+                safe_draw_circle(screen, col, b, 3)
 
     pygame.display.flip()
 
 
 # ---------- ArUco → Screen mapping ----------
-CAM_W = 640     # 你的摄像头分辨率（按 A 实际）
+CAM_W = 640     # The camera resolution used in A
 CAM_H = 480
 def aruco_to_screen(x, y):
     sx = x / CAM_W * WIDTH
@@ -408,7 +410,7 @@ def shapes_from_aruco(aruco_list):
             poly = make_rotated_square(cx, cy, SQUARE_SIZE, ang)
             is_square = True
         else:
-            # 其他 ID：可选策略
+            # Other IDs
             continue
 
         shapes.append({
@@ -423,24 +425,25 @@ def shapes_from_aruco(aruco_list):
 def run():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Stable Refraction Simulation (Left + Right Rays)")
+    pygame.display.set_caption("AreciboMessage")
 
     context = zmq.Context()
     aruco_sub = context.socket(zmq.SUB)
-    aruco_sub.connect("tcp://127.0.0.1:5556")  # 与 A 保持一致
+    aruco_sub.connect("tcp://127.0.0.1:5556")  # Stay consistent with A
     aruco_sub.setsockopt_string(zmq.SUBSCRIBE, "")
-    aruco_sub.RCVTIMEO = 1   # 非阻塞
+    aruco_sub.RCVTIMEO = 1   # Non-blocking
 
     shapes = []
+    show_debug = False   # Boolean to show rays or not
 
-    # 左侧三条光线
+    # Rays on the left side
     left_sources = [
         (0.0, HEIGHT * 0.25),
         (0.0, HEIGHT * 0.50),
         (0.0, HEIGHT * 0.75),
     ]
 
-    # 右侧三条光线
+    # Rays on the right side
     right_sources = [
         (WIDTH, HEIGHT * 0.25),
         (WIDTH, HEIGHT * 0.50),
@@ -461,6 +464,8 @@ def run():
             elif ev.type == pygame.KEYDOWN: 
                 if ev.key == pygame.K_ESCAPE: 
                     running = False
+                elif ev.key == pygame.K_r:
+                    show_debug = not show_debug
 
         # -------- ZMQ receive aruco data --------
         try:
@@ -472,7 +477,7 @@ def run():
             pass
 
         if recompute:
-            # === 清空光栅（否则会残留）===
+            # Reset grid lit
             for cx in range(GRID_COLS):
                 for cy in range(GRID_ROWS):
                     grid_lit[cx][cy] = False
@@ -486,20 +491,20 @@ def run():
                 rays = trace_ray((sx, sy), direction, shapes)
                 all_rays.append(rays)
 
-                # === 新增：标记所有格子 ===
+                # Mark all grid cells
                 for seg in rays:
                     if not isinstance(seg, (tuple, list)):
                         continue
                     if len(seg) < 3:
                         continue
 
-                    a, b, inside = seg[:3]    # 自动裁剪为 3 个值
+                    a, b, inside = seg[:3]
                     if is_valid_point(a) and is_valid_point(b):
                         mark_segment_on_grid(a, b)
 
             recompute = False
 
-        draw_scene(screen, shapes, all_rays)
+        draw_scene(screen, shapes, all_rays, show_debug)
         clock.tick(60)
 
     aruco_sub.close()
