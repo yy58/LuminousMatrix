@@ -390,17 +390,11 @@ def aruco_to_screen(x, y):
     sy = y / CAM_H * HEIGHT
     return sx, sy
 
-def clamp_to_safe_region(x, y, margin=120):
-    x = max(margin, min(WIDTH - margin, x))
-    y = max(margin, min(HEIGHT - margin, y))
-    return x, y
-
 def shapes_from_aruco(aruco_list):
     shapes = []
 
     for item in aruco_list:
         cx, cy = aruco_to_screen(item["x"], item["y"])
-        cx, cy = clamp_to_safe_region(cx, cy)
         print("screen pos:", cx, cy)
 
         ang = math.radians(item["yaw"])
