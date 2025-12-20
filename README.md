@@ -3,6 +3,11 @@
 ---
 
 ## Overview
+[▶ Watch the prism–light–sound interaction demo]
+
+
+https://github.com/user-attachments/assets/2209e582-0f89-488f-8bcf-f8d22813d72e
+
 
 *LuminousMatrix* speculates on a universal communication system shared by intelligent civilisations across the cosmos.  
 In this fictional framework, no species transmits language directly.  
