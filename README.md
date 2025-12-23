@@ -82,6 +82,45 @@ Arecibo becomes not a relic, but a **template for generating new cosmic transmis
 ---
 
 
+#  Project Structure
+
+```
+📁 Aruco/
+├─ maker_id.png                     # Aruco code
+
+📁 Main/
+├─ Arecibo Message/               # Detect Aruco and generate the Arecibo Message
+├─ Light2Max/                     # Sound processing
+├─ Maxmsp/                        # Communicate with Maxmsp
+├─ Main.py                       
+
+📁 TTT/      # Testfile (Not required)
+├─ ......
+📁 YYY/      # Testfile (Not required)
+├─ ......
+
+📃 README.md                # Documentation
+📃 requirements.txt
+```
+
+### How to Run
+
+1. Clone this repository (you may ignore `TTT` and `YYY`, which are **not required** for running the main program)
+2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+**External Dependency**: This project requires **Max/MSP** to be installed separately.
+
+3. Run the main script:
+
+```bash
+python Main/Main.py
+```
+
+---
+
 
 #  System Architecture
 
